@@ -5,9 +5,12 @@ import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.view.View;
 import android.widget.ArrayAdapter;
@@ -34,6 +37,7 @@ import com.example.ew2026demo.simulation.SimulationEngine;
 
 import org.osmdroid.views.MapView;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -82,10 +86,22 @@ public class MainActivity extends AppCompatActivity
     private ArrayAdapter<String> browseAdapter;
     private final List<String> browseDisplayList = new ArrayList<>();
     private final List<BluetoothDevice> browseDeviceList = new ArrayList<>();
+    private boolean browseUpdatePending = false;
+    private static final long BROWSE_UPDATE_INTERVAL_MS = 300;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Pre-initialize osmdroid configuration BEFORE setContentView
+        org.osmdroid.config.IConfigurationProvider config = org.osmdroid.config.Configuration.getInstance();
+        config.setUserAgentValue("EW2026Demo");
+
+        // Use internal files directory for stability on Android 10+
+        File basePath = new File(getFilesDir(), "osmdroid");
+        config.setOsmdroidBasePath(basePath);
+        config.setOsmdroidTileCache(new File(basePath, "tiles"));
+
         setContentView(R.layout.activity_main);
 
         initViews();
@@ -97,7 +113,10 @@ public class MainActivity extends AppCompatActivity
         addLog("EW2026 Demo started");
         addLog(String.format(Locale.US, "Route: %.0f m, %d waypoints",
                 RouteData.getTotalDistance(), route.size()));
-        checkPermissions();
+
+        if (!checkPermissions()) {
+            requestPermissions();
+        }
     }
 
     private void initViews() {
@@ -136,11 +155,30 @@ public class MainActivity extends AppCompatActivity
 
     private void initMap() {
         MapView mapView = findViewById(R.id.mapView);
+        // Set a background color to see if the view is present
+        mapView.setBackgroundColor(0xFFEEEEEE); 
+        
+        // Android 12/13 fix: Force software rendering for the MapView
+        mapView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
         mapManager = new MapManager(this, mapView);
+        // Pass log to MapManager
+        mapManager.setLogCallback(this::addLog);
         mapManager.initMap();
 
         route = RouteData.getRoute();
         mapManager.drawRoute(route);
+
+        // Ensure center and zoom are set after layout
+        mapView.post(() -> {
+            mapManager.setZoom(17.0);
+            if (!route.isEmpty()) {
+                mapManager.updateCarPosition(route.get(0).lat, route.get(0).lon, 0);
+            } else {
+                mapView.getController().setCenter(new org.osmdroid.util.GeoPoint(49.435, 11.094));
+            }
+            addLog("Map view layout completed");
+        });
     }
 
     private void initSimulation() {
@@ -303,8 +341,24 @@ public class MainActivity extends AppCompatActivity
 
     // ---- BLE Browse & Connect ----
 
+    private boolean isLocationEnabled() {
+        LocationManager lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        return lm != null && (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
+    }
+
     @SuppressLint("MissingPermission")
     private void startBrowseAndShowDialog() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && !isLocationEnabled()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Location Required")
+                    .setMessage("BLE scanning requires Location Services to be enabled on this Android version.")
+                    .setPositiveButton("Open Settings", (d, w) ->
+                            startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)))
+                    .setNegativeButton("Cancel", null)
+                    .show();
+            return;
+        }
         browseDisplayList.clear();
         browseDeviceList.clear();
 
@@ -360,10 +414,19 @@ public class MainActivity extends AppCompatActivity
                 browseDeviceList.add(device);
             }
 
+            scheduleBrowseListUpdate();
+        });
+    }
+
+    private void scheduleBrowseListUpdate() {
+        if (browseUpdatePending) return;
+        browseUpdatePending = true;
+        new Handler(getMainLooper()).postDelayed(() -> {
+            browseUpdatePending = false;
             if (browseAdapter != null) {
                 browseAdapter.notifyDataSetChanged();
             }
-        });
+        }, BROWSE_UPDATE_INTERVAL_MS);
     }
 
     @SuppressLint("MissingPermission")

@@ -43,13 +43,24 @@ public class MapManager {
         this.mapView = mapView;
     }
 
-    public void initMap() {
-        File basePath = new File(context.getCacheDir(), "osmdroid");
-        File tileCachePath = new File(basePath, "tiles");
+    private LogCallback logCallback;
 
-        Configuration.getInstance().setUserAgentValue("EW2026Demo");
-        Configuration.getInstance().setOsmdroidBasePath(basePath);
-        Configuration.getInstance().setOsmdroidTileCache(tileCachePath);
+    public interface LogCallback {
+        void onLog(String message);
+    }
+
+    public void setLogCallback(LogCallback callback) {
+        this.logCallback = callback;
+    }
+
+    private void addLog(String msg) {
+        Log.i(TAG, msg);
+        if (logCallback != null) logCallback.onLog(msg);
+    }
+
+    public void initMap() {
+        // Configuration is now handled in MainActivity before setContentView
+        File tileCachePath = Configuration.getInstance().getOsmdroidTileCache();
 
         // Extract offline tiles into osmdroid cache so they work with default MAPNIK source
         extractOfflineTilesToCache(tileCachePath);
@@ -59,9 +70,7 @@ public class MapManager {
         mapView.setMultiTouchControls(true);
         mapView.setBuiltInZoomControls(false);
 
-        IMapController controller = mapView.getController();
-        controller.setZoom(17.0);
-        controller.setCenter(new GeoPoint(49.435, 11.094));
+        // Removed direct setZoom/setCenter here; handled in MainActivity.post()
     }
 
     /**
@@ -73,17 +82,19 @@ public class MapManager {
         // Marker file to avoid re-extracting every launch
         File marker = new File(tileCachePath, ".nuremberg_extracted");
         if (marker.exists()) {
-            Log.i(TAG, "Offline tiles already extracted");
+            addLog("Tiles: Already cached");
             return;
         }
 
+        addLog("Tiles: Copying asset...");
         File zipInCache = copyAssetToCache("tiles/nuremberg.zip");
         if (zipInCache == null || !zipInCache.exists()) {
-            Log.w(TAG, "No offline tile ZIP found in assets");
+            addLog("Tiles: Error - ZIP not found");
             return;
         }
 
         try {
+            addLog("Tiles: Extracting...");
             ZipFile zip = new ZipFile(zipInCache);
             Enumeration<? extends ZipEntry> entries = zip.entries();
             int count = 0;
@@ -98,26 +109,30 @@ public class MapManager {
                 // Convert to osmdroid cache path: Mapnik/{z}/{x}/{y}.png.tile
                 String tilePath = "Mapnik/" + name + ".tile";
                 File outFile = new File(tileCachePath, tilePath);
-                outFile.getParentFile().mkdirs();
+                
+                if (!outFile.exists()) {
+                    outFile.getParentFile().mkdirs();
 
-                InputStream is = zip.getInputStream(entry);
-                FileOutputStream fos = new FileOutputStream(outFile);
-                byte[] buf = new byte[4096];
-                int len;
-                while ((len = is.read(buf)) != -1) {
-                    fos.write(buf, 0, len);
+                    InputStream is = zip.getInputStream(entry);
+                    FileOutputStream fos = new FileOutputStream(outFile);
+                    byte[] buf = new byte[4096];
+                    int len;
+                    while ((len = is.read(buf)) != -1) {
+                        fos.write(buf, 0, len);
+                    }
+                    fos.close();
+                    is.close();
                 }
-                fos.close();
-                is.close();
                 count++;
             }
             zip.close();
 
             // Write marker
             marker.createNewFile();
-            Log.i(TAG, "Extracted " + count + " offline tiles to cache");
+            addLog("Tiles: Extracted " + count + " files");
 
         } catch (Exception e) {
+            addLog("Tiles: Extract error - " + e.getMessage());
             Log.e(TAG, "Failed to extract offline tiles", e);
         }
     }

@@ -5,6 +5,7 @@ import android.bluetooth.*;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
@@ -113,7 +114,10 @@ public class BLEManager {
         isBrowseScanning = true;
         Log.i(TAG, "Start browse scan");
 
-        bleScanner.startScan(browseScanCallback);
+        ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+                .build();
+        bleScanner.startScan(null, settings, browseScanCallback);
         handler.postDelayed(this::stopBrowseScan, 30000);
     }
 
