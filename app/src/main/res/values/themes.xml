@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.EW2026Demo" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#263238</item>
+        <item name="colorPrimaryDark">#1B2631</item>
+        <item name="colorAccent">#80CBC4</item>
+        <item name="android:statusBarColor">#1B2631</item>
+    </style>
+</resources>
