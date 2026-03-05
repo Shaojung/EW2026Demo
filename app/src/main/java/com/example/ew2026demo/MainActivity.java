@@ -38,6 +38,8 @@ import com.example.ew2026demo.simulation.SimulationEngine;
 import org.osmdroid.views.MapView;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -101,6 +103,10 @@ public class MainActivity extends AppCompatActivity
         File basePath = new File(getFilesDir(), "osmdroid");
         config.setOsmdroidBasePath(basePath);
         config.setOsmdroidTileCache(new File(basePath, "tiles"));
+
+        // Copy offline tile archive BEFORE setContentView so that osmdroid's
+        // MapTileFileArchiveProvider finds it during MapView initialisation
+        copyTileArchive(basePath);
 
         setContentView(R.layout.activity_main);
 
@@ -506,6 +512,28 @@ public class MainActivity extends AppCompatActivity
                 addLog("Permissions denied");
                 Toast.makeText(this, "BLE permissions required", Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    // ---- Tile archive ----
+
+    private void copyTileArchive(File basePath) {
+        File dest = new File(basePath, "nuremberg.zip");
+        if (dest.exists()) return;
+        try {
+            basePath.mkdirs();
+            InputStream is = getAssets().open("tiles/nuremberg.zip");
+            FileOutputStream fos = new FileOutputStream(dest);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = is.read(buf)) != -1) {
+                fos.write(buf, 0, len);
+            }
+            fos.close();
+            is.close();
+            Log.i(TAG, "Tile archive copied to " + dest.getAbsolutePath());
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to copy tile archive", e);
         }
     }
 

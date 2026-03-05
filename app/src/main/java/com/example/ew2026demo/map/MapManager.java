@@ -7,10 +7,9 @@ import android.util.Log;
 
 import androidx.core.content.ContextCompat;
 
-import org.osmdroid.api.IMapController;
-import org.osmdroid.config.Configuration;
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
+import org.osmdroid.tileprovider.tilesource.XYTileSource;
 import org.osmdroid.util.GeoPoint;
+import org.osmdroid.util.MapTile;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Marker;
 import org.osmdroid.views.overlay.Polyline;
@@ -18,14 +17,8 @@ import org.osmdroid.views.overlay.Polyline;
 import com.example.ew2026demo.R;
 import com.example.ew2026demo.simulation.RouteWaypoint;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
 
 public class MapManager {
     private static final String TAG = "MapManager";
@@ -59,82 +52,27 @@ public class MapManager {
     }
 
     public void initMap() {
-        // Configuration is now handled in MainActivity before setContentView
-        File tileCachePath = Configuration.getInstance().getOsmdroidTileCache();
-
-        // Extract offline tiles into osmdroid cache so they work with default MAPNIK source
-        extractOfflineTilesToCache(tileCachePath);
-
-        // Always use MAPNIK — works online (emulator) + offline (cached tiles at expo)
-        mapView.setTileSource(TileSourceFactory.MAPNIK);
+        // Use a custom tile source whose getTileRelativeFilenameString() returns
+        // "{z}/{x}/{y}.png" (no "Mapnik/" prefix) so that osmdroid's built-in
+        // MapTileFileArchiveProvider can look up entries inside nuremberg.zip,
+        // which stores tiles as {z}/{x}/{y}.png.
+        // Online URLs remain unchanged (https://tile.openstreetmap.org/{z}/{x}/{y}.png).
+        mapView.setTileSource(new XYTileSource(
+                "Mapnik", 0, 19, 256, ".png",
+                new String[]{
+                        "https://a.tile.openstreetmap.org/",
+                        "https://b.tile.openstreetmap.org/",
+                        "https://c.tile.openstreetmap.org/"
+                }
+        ) {
+            @Override
+            public String getTileRelativeFilenameString(MapTile tile) {
+                return tile.getZoomLevel() + "/" + tile.getX() + "/"
+                        + tile.getY() + ".png";
+            }
+        });
         mapView.setMultiTouchControls(true);
         mapView.setBuiltInZoomControls(false);
-
-        // Removed direct setZoom/setCenter here; handled in MainActivity.post()
-    }
-
-    /**
-     * Extract tiles from assets/tiles/nuremberg.zip into osmdroid's tile cache.
-     * osmdroid MAPNIK cache format: {tileCachePath}/Mapnik/{z}/{x}/{y}.png.tile
-     * Our ZIP format:              {z}/{x}/{y}.png
-     */
-    private void extractOfflineTilesToCache(File tileCachePath) {
-        // Marker file to avoid re-extracting every launch
-        File marker = new File(tileCachePath, ".nuremberg_extracted");
-        if (marker.exists()) {
-            addLog("Tiles: Already cached");
-            return;
-        }
-
-        addLog("Tiles: Copying asset...");
-        File zipInCache = copyAssetToCache("tiles/nuremberg.zip");
-        if (zipInCache == null || !zipInCache.exists()) {
-            addLog("Tiles: Error - ZIP not found");
-            return;
-        }
-
-        try {
-            addLog("Tiles: Extracting...");
-            ZipFile zip = new ZipFile(zipInCache);
-            Enumeration<? extends ZipEntry> entries = zip.entries();
-            int count = 0;
-
-            while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
-                if (entry.isDirectory()) continue;
-
-                String name = entry.getName(); // e.g. "15/17390/11189.png"
-                if (!name.endsWith(".png")) continue;
-
-                // Convert to osmdroid cache path: Mapnik/{z}/{x}/{y}.png.tile
-                String tilePath = "Mapnik/" + name + ".tile";
-                File outFile = new File(tileCachePath, tilePath);
-                
-                if (!outFile.exists()) {
-                    outFile.getParentFile().mkdirs();
-
-                    InputStream is = zip.getInputStream(entry);
-                    FileOutputStream fos = new FileOutputStream(outFile);
-                    byte[] buf = new byte[4096];
-                    int len;
-                    while ((len = is.read(buf)) != -1) {
-                        fos.write(buf, 0, len);
-                    }
-                    fos.close();
-                    is.close();
-                }
-                count++;
-            }
-            zip.close();
-
-            // Write marker
-            marker.createNewFile();
-            addLog("Tiles: Extracted " + count + " files");
-
-        } catch (Exception e) {
-            addLog("Tiles: Extract error - " + e.getMessage());
-            Log.e(TAG, "Failed to extract offline tiles", e);
-        }
     }
 
     public void drawRoute(List<RouteWaypoint> waypoints) {
@@ -217,26 +155,4 @@ public class MapManager {
         mapView.invalidate();
     }
 
-    private File copyAssetToCache(String assetPath) {
-        try {
-            File cacheFile = new File(context.getCacheDir(), assetPath);
-            if (cacheFile.exists()) return cacheFile;
-
-            cacheFile.getParentFile().mkdirs();
-            InputStream is = context.getAssets().open(assetPath);
-            FileOutputStream fos = new FileOutputStream(cacheFile);
-            byte[] buffer = new byte[8192];
-            int len;
-            while ((len = is.read(buffer)) != -1) {
-                fos.write(buffer, 0, len);
-            }
-            fos.close();
-            is.close();
-            Log.i(TAG, "Copied asset to cache: " + cacheFile.getAbsolutePath());
-            return cacheFile;
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to copy asset: " + assetPath, e);
-            return null;
-        }
-    }
 }
